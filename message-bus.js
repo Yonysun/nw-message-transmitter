@@ -11,8 +11,7 @@ function MessageBus() {
   return {
     onMessage: function(type, callback) {
       this.eventHandler[type] = callback;
-    }
-
+    },
     sendMessage: function(type, data) {
       return new Promise(resolve => {
         chrome.runtime.sendMessage({cmd: type, data: data}, function (response) {
