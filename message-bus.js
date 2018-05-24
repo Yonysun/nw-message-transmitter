@@ -1,6 +1,6 @@
 /**
  * 消息处理器
- * Created by sunyuan on 2018-05-24 10:41:02
+ * Created by shenchuochuo on 2018-05-24 10:41:02
  */
 
 class MessageBus{
