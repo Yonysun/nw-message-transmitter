@@ -1,6 +1,6 @@
 {
-  "name": "nw-message-bus",
+  "name": "nw-message-transmitter",
   "version": "0.0.1",
   "license": "MIT",
-  "main": "message-bus.js"
+  "main": "index.js"
 }
