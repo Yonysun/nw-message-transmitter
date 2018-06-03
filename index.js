@@ -3,70 +3,111 @@
  * Created by shenchuochuo on 2018-05-24 10:41:02
  */
 
+const sendResponse = (port, cmd, data) => {
+  port.postMessage({cmd: cmd, data: data, isResponse: 1});
+}
+
 class MessageTransmitter {
   constructor(options) {
-    this._eventHandler = {};
-    if (options && options.initHandler) {
+    this.msgHandler = {};
+    this.portPool = {};
+    if (!options) {
+      throw new Error('MessageTransmitter need options');
+    }
+
+    this.enableLog = options.enableLog === true;
+
+    if (options.initHandler) {
       if (typeof options.initHandler === 'function') {
         this._initHandler = options.initHandler;
       } else {
         throw new Error('initHandler must be a function');
       }
-    }else{
+    } else {
       this._initHandler = null;
     }
-    this._inited = options && !!options.inited;
-    this._needAuth = options && !!options.needAuth;
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.initInfo && this._initHandler) {
-        this._initHandler(request.initInfo, sendResponse);
-      } else if (request.cmd && typeof this._eventHandler[request.cmd] === 'function') {
-        if (this._needAuth && !this._inited) {
-          sendResponse('store未初始化，无法处理业务');
-          return;
+    this._inited = options.inited === true;
+    this._needAuth = options.needAuth === true;
+
+    const $this = this;
+    /* 添加连接监听 */
+    chrome.runtime.onConnect.addListener(port => {
+      $this.enableLog && console.log('onConnect port', port);
+      /* 添加消息总监听 */
+      port.onMessage.addListener(function (request) {
+        $this.enableLog && console.log('port %s onMessage：', port.name, request);
+        /* 判断消息类型并进行处理 */
+        console.log(request.cmd, $this.msgHandler[port.name], typeof $this.msgHandler[port.name][request.cmd] === 'function')
+        if (request.cmd && $this.msgHandler[port.name] && typeof $this.msgHandler[port.name][request.cmd] === 'function') {
+          /* 判断消息是否合法 */
+          if ($this._needAuth && !$this._inited && request.isResponse === 0) {
+            sendResponse(port, request.cmd, {res: 0, message: 'store未初始化，无法处理业务'});
+            return;
+          }
+          $this.msgHandler[port.name][request.cmd](request.data, function (data) {
+            if (request.isResponse === 0) sendResponse(port, request.cmd, data);
+          });
+        } else {
+          if (request.isResponse === 0) {
+            sendResponse(port, request.cmd, {res: 0, message: 'unknown message type'});
+          }
         }
-        this._eventHandler[request.cmd](request.data, sendResponse);
+        return true;
+      });
+      this.portPool[port.name] = port;
+    });
+    chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+      $this.enableLog && console.log('onMessage data', request);
+      if (request.initInfo && $this._initHandler) {
+        $this.enableLog = !!request.initInfo.debug;
+        /* 初始化消息服务 */
+        $this._initHandler(request.initInfo).then(res => {
+          $this._inited = res;
+          sendResponse('后台脚本初始化成功');
+        }).catch(e => {
+          sendResponse('后台脚本初始化失败: ' + e.message)
+          throw e;
+        });
       } else {
-        sendResponse('未知的消息类型');
+        sendResponse('数据格式不正确，后台脚本初始化失败：' + typeof request === 'object' ? JSON.stringify(request) : request)
       }
+      return true;
     });
   }
 
-  onMessage(type, callback) {
-    this._eventHandler[type] = callback;
+  addMsgListener(portName, type, callback) {
+    if (!this.msgHandler[portName]) this.msgHandler[portName] = {};
+    this.msgHandler[portName][type] = callback;
   }
 
-  sendMessage(type, data) {
+  removeMsgListener(portName, type) {
+    this.portPool[portName] && delete this.portPool[portName][type];
+  }
+
+  sendMsg(portName, type, data) {
+    if (this.enableLog) console.log('sendMessage data = {portName: s%, type: s%,data:s%}', portName, type, data);
     return new Promise(resolve => {
-      chrome.runtime.sendMessage({cmd: type, data: data}, function (response) {
+      this.portPool[portName].sendMessage({cmd: type, data: data, isResponse: 0}, function (response) {
         resolve(response);
       });
     });
   }
 
-  init(data) {
-    return new Promise(resolve => {
-      chrome.runtime.sendMessage({initInfo: data}, function (response) {
-        resolve(response);
-      });
-    });
-  }
-
-  get eventHandler() {
-    return this._eventHandler;
-  }
-
-  set eventHandler(value) {
-    this._eventHandler = value;
-  }
+  //
+  // async init(data) {
+  //   const initResult = await new Promise(resolve => {
+  //     chrome.runtime.sendMessage({initInfo: data}, function (response) {
+  //       resolve(response);
+  //     });
+  //   });
+  //   this._inited = initResult;
+  //   return initResult;
+  // }
 
   set initHandler(value) {
     this._initHandler = value;
   }
 
-  set inited(value) {
-    this._inited = value;
-  }
 }
 
 module.exports = MessageTransmitter;
